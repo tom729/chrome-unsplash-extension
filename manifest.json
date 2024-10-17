@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "Unsplash Wallpaper Changer",
+  "version": "1.0",
+  "description": "Periodically changes the new tab wallpaper using images from Unsplash",
+  "permissions": ["storage", "alarms"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "chrome_url_overrides": {
+    "newtab": "index.html"
+  }
+}
