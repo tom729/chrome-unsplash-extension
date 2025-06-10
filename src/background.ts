@@ -38,7 +38,7 @@ function updateWallpaper() {
       const wallpaperData = { 
         wallpaper: data.urls.full,
         photographer: data.user.name,
-        photoUrl: data.links.html
+        photoUrl: data.links.html.replace('https://unsplash.com', 'https://www.unsplash.com')
       };
 
       if (isExtension) {

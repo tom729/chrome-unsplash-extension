@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "Unsplash Wallpaper Changer",
+  "name": "Aesthetic and Productive Tab",
   "version": "1.0",
-  "description": "Periodically changes the new tab wallpaper using images from Unsplash",
-  "permissions": ["storage", "alarms"],
+  "description": "New tab with Unsplash photography, customizable shortcuts, multi-engine search. Make every tab an inspiring workspace.",
+  "permissions": ["storage", "alarms", "search", "downloads", "history"],
   "background": {
     "service_worker": "background.js"
   },
