@@ -14,13 +14,18 @@ export default defineConfig({
     viteStaticCopy({
       targets: [
         {
-          src: 'manifest.json',
-          dest: '.',
+          src: 'src/background.ts',
+          dest: '.'
         },
-      ],
+        {
+          src: 'manifest.json',
+          dest: '.'
+        },
+      ]
     }),
   ],
   build: {
+    assetsInlineLimit: 10000,
     rollupOptions: {
       input: {
         main: path.resolve(__dirname, 'index.html'),

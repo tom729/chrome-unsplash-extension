@@ -1,9 +1,22 @@
 {
   "manifest_version": 3,
   "name": "Aesthetic and Productive Tab",
-  "version": "1.0",
+  "version": "1.5",
   "description": "New tab with Unsplash photography, customizable shortcuts, multi-engine search. Make every tab an inspiring workspace.",
-  "permissions": ["storage", "alarms", "search", "downloads", "history"],
+  "permissions": [
+    "storage",
+    "alarms",
+    "search",
+    "downloads",
+    "history"
+  ],
+  "host_permissions": [
+    "https://s2.googleusercontent.com/",
+    "https://api.unsplash.com/"
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; img-src 'self' data: blob: https://s2.googleusercontent.com/ https://images.unsplash.com/ https://*.gstatic.com/; connect-src 'self' https://s2.googleusercontent.com/ https://api.unsplash.com/;"
+  },
   "background": {
     "service_worker": "background.js"
   },

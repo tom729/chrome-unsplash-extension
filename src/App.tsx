@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Download, Search } from 'lucide-react';
+import { Download, Search, Plus } from 'lucide-react';
 import ColorThief from 'colorthief';
 
 // Mock chrome API for development environment
@@ -41,10 +41,16 @@ const mockChrome = {
       const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(queryInfo.text)}`;
       window.open(searchUrl, '_blank');
     }
+  },
+  history: {
+    search: (query: chrome.history.HistoryQuery, callback: (results: chrome.history.HistoryItem[]) => void) => {
+      console.log('Mock history.search:', query);
+      callback([]);
+    }
   }
 };
 
-const chromeApi = typeof chrome !== 'undefined' && chrome.search ? chrome : mockChrome;
+const chromeApi = typeof chrome !== 'undefined' && chrome.runtime.id ? chrome : mockChrome;
 
 function getMonthCalendar(year: number, month: number) {
   // 返回一个二维数组，表示日历的每一行（周）
@@ -75,6 +81,33 @@ function getDomain(url: string) {
   }
 }
 
+// 获取用于favicon的主域名
+function getRootDomain(domain: string) {
+  const parts = domain.split('.');
+  if (parts.length > 2) {
+    // 处理 .co.uk, .com.cn 等情况
+    if (parts.length > 2 && parts[parts.length-2].length <= 3 && parts[parts.length-1].length <= 2) {
+      return parts.slice(-3).join('.');
+    }
+    return parts.slice(-2).join('.');
+  }
+  return domain;
+}
+
+// Favicon组件，优先用自定义图标，否则用Google服务
+function Favicon({ domain, defaultFavicon, customFavicon }: { domain: string; defaultFavicon: string; customFavicon?: string }) {
+  const src = customFavicon || `https://s2.googleusercontent.com/s2/favicons?sz=64&domain_url=${domain}`;
+  return (
+    <img
+      src={src}
+      alt={domain}
+      className="w-14 h-14 rounded-xl shadow-md bg-white/40 group-hover:scale-125 group-hover:shadow-2xl transition-transform duration-200"
+      style={{ objectFit: 'contain' }}
+      onError={(e) => { (e.target as HTMLImageElement).src = defaultFavicon; }}
+    />
+  );
+}
+
 function App() {
   const [wallpaper, setWallpaper] = useState('');
   const [time, setTime] = useState(new Date());
@@ -95,7 +128,7 @@ function App() {
   const weekDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
   // 日历拖动相关
-  const defaultCalendarPos = { top: 24, left: window.innerWidth - 400 };
+  const defaultCalendarPos = { top: 24, left: window.innerWidth - 400, right: 24 };
   const [calendarPos, setCalendarPos] = useState(() => {
     const saved = localStorage.getItem('calendarPos');
     return saved ? JSON.parse(saved) : defaultCalendarPos;
@@ -195,13 +228,13 @@ function App() {
   const handleSearch = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!searchTerm.trim()) return;
-    chromeApi.search.query({ text: searchTerm, disposition: 'NEW_TAB' });
+    chromeApi.search.query({ text: searchTerm });
   };
 
   const handleDownload = () => {
     // Sanitize the photographer's name to remove characters that are invalid in filenames
     const sanitizedPhotographer = photographer.replace(/[\\/:*?"<>|]/g, '').trim();
-    const filename = `unsplash-${sanitizedPhotographer.replace(/\s+/g, '-') || 'wallpaper'}.jpg`;
+    const filename = `unsplash-${sanitizedPhotographer.replace(/\\s+/g, '-') || 'wallpaper'}.jpg`;
     chromeApi.runtime.sendMessage({
       action: 'downloadWallpaper',
       url: downloadUrl,
@@ -210,77 +243,108 @@ function App() {
   };
 
   // Dock栏相关
-  const fallbackSites = [
-    { domain: 'github.com', url: 'https://github.com', count: 1 },
-    { domain: 'bilibili.com', url: 'https://bilibili.com', count: 1 },
-    { domain: 'zhihu.com', url: 'https://zhihu.com', count: 1 },
-    { domain: 'google.com', url: 'https://google.com', count: 1 },
-    { domain: 'weixin.qq.com', url: 'https://weixin.qq.com', count: 1 },
-    { domain: 'douban.com', url: 'https://douban.com', count: 1 },
-    { domain: 'csdn.net', url: 'https://csdn.net', count: 1 },
-    { domain: 'taobao.com', url: 'https://taobao.com', count: 1 },
-    { domain: 'jd.com', url: 'https://jd.com', count: 1 },
-    { domain: 'baidu.com', url: 'https://baidu.com', count: 1 },
-  ];
   const [dockSites, setDockSites] = useState<{ domain: string; url: string; count: number }[]>([]);
-  const [validDockSites, setValidDockSites] = useState<typeof dockSites>([]);
-  const dockRef = useRef<HTMLDivElement>(null);
-  const [maxDockIcons, setMaxDockIcons] = useState(10);
+  const [maxDockIcons] = useState(15);
+  const [customSites, setCustomSites] = useState<any[]>(() => {
+    try {
+      const saved = localStorage.getItem('customSites');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [historySiteBlacklist, setHistorySiteBlacklist] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('historySiteBlacklist');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [showAddSite, setShowAddSite] = useState(false);
+  const [addSiteUrl, setAddSiteUrl] = useState('');
+  const [siteToConfirmDelete, setSiteToConfirmDelete] = useState<{ domain: string, type: 'custom' | 'history' } | null>(null);
 
   // 统计最近一周常用网站
   useEffect(() => {
-    if (!chrome.history) {
-      setValidDockSites(fallbackSites);
-      return;
-    }
     const oneWeekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-    chrome.history.search({ text: '', startTime: oneWeekAgo, maxResults: 1000 }, (results) => {
+    chromeApi.history.search({ text: '', startTime: oneWeekAgo, maxResults: 1000 }, (results) => {
       const domainMap: Record<string, { count: number; url: string; lastVisitTime: number }> = {};
       results.forEach(item => {
-        const domain = getDomain(item.url || '');
-        if (!domain || domain.endsWith('google.com') || domain.endsWith('baidu.com') || domain.endsWith('bing.com')) return; // 可排除搜索引擎
-        if (!domainMap[domain]) domainMap[domain] = { count: 0, url: item.url || '', lastVisitTime: 0 };
+        if (!item.url) return;
+        const domain = getDomain(item.url);
+        if (!domain || domain.endsWith('google.com') || domain.endsWith('baidu.com') || domain.endsWith('bing.com')) return;
+        if (!domainMap[domain]) domainMap[domain] = { count: 0, url: item.url, lastVisitTime: 0 };
         domainMap[domain].count += item.visitCount || 1;
         if ((item.lastVisitTime || 0) > (domainMap[domain].lastVisitTime || 0)) {
-          domainMap[domain].url = item.url || '';
+          domainMap[domain].url = item.url;
           domainMap[domain].lastVisitTime = item.lastVisitTime || 0;
         }
       });
       const arr = Object.entries(domainMap)
         .map(([domain, v]) => ({ domain, url: v.url, count: v.count }))
-        .sort((a, b) => b.count - a.count)
-        .slice(0, maxDockIcons);
+        .sort((a, b) => b.count - a.count);
       setDockSites(arr);
     });
-  }, [maxDockIcons]);
+  }, [historySiteBlacklist]); // Re-fetch if blacklist changes
 
-  // 根据底部宽度自适应最大图标数
-  useEffect(() => {
-    const calc = () => {
-      const width = window.innerWidth;
-      const iconSize = 56, gap = 16;
-      const max = Math.max(4, Math.floor((width - 64) / (iconSize + gap)));
-      setMaxDockIcons(max);
-    };
-    calc();
-    window.addEventListener('resize', calc);
-    return () => window.removeEventListener('resize', calc);
-  }, []);
-
-  // 过滤掉没有favicon的网站
-  useEffect(() => {
-    setValidDockSites([]); // 重置
-  }, [dockSites]);
-
-  const handleFaviconLoad = (domain: string) => {
-    setValidDockSites(prev => {
-      if (prev.find(site => site.domain === domain)) return prev;
-      const site = dockSites.find(s => s.domain === domain);
-      return site ? [...prev, site] : prev;
-    });
+  // 保存自定义网站到localStorage
+  const saveCustomSites = (sites: any[]) => {
+    setCustomSites(sites);
+    localStorage.setItem('customSites', JSON.stringify(sites));
   };
-  const handleFaviconError = (domain: string) => {
-    setValidDockSites(prev => prev.filter(site => site.domain !== domain));
+  
+  // 保存黑名单
+  const saveHistorySiteBlacklist = (list: string[]) => {
+    setHistorySiteBlacklist(list);
+    localStorage.setItem('historySiteBlacklist', JSON.stringify(list));
+  };
+  
+  // 添加自定义网站
+  const handleAddSite = () => {
+    if (!addSiteUrl.trim()) return;
+    let url = addSiteUrl.trim();
+    if (!/^https?:\/\//.test(url)) url = 'https://' + url;
+    let domain = '';
+    try { domain = new URL(url).hostname; } catch { return; }
+    if (!domain) return;
+    
+    let sites = [...customSites];
+    if (sites.length >= 5) sites = sites.slice(1); // Keep max 5 custom sites
+    
+    sites.push({ url, domain, addTime: Date.now() });
+    saveCustomSites(sites);
+    setShowAddSite(false);
+    setAddSiteUrl('');
+  };
+
+  // 长按删除逻辑
+  const longPressTimer = useRef<NodeJS.Timeout | null>(null);
+
+  const handleMouseDown = (site: any, type: 'custom' | 'history') => {
+    longPressTimer.current = setTimeout(() => {
+      setSiteToConfirmDelete({ domain: site.domain, type });
+    }, 800);
+  };
+
+  const handleMouseUp = () => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+    }
+  };
+
+  const confirmDelete = () => {
+    if (!siteToConfirmDelete) return;
+
+    if (siteToConfirmDelete.type === 'custom') {
+      const newSites = customSites.filter(s => s.domain !== siteToConfirmDelete!.domain);
+      saveCustomSites(newSites);
+    } else {
+      const newList = Array.from(new Set([...historySiteBlacklist, siteToConfirmDelete.domain]));
+      saveHistorySiteBlacklist(newList);
+    }
+    setSiteToConfirmDelete(null);
   };
 
   // 版权自动反差样式
@@ -292,6 +356,93 @@ function App() {
 
   // Dock栏相关
   const defaultFavicon = 'data:image/svg+xml;utf8,<svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="24" cy="24" r="20" fill="%23E5E7EB"/><circle cx="24" cy="24" r="18" fill="%233B82F6"/><path d="M24 6a18 18 0 100 36 18 18 0 000-36zm0 2c2.5 0 4.5 6.5 4.5 14.5S26.5 37 24 37 19.5 30.5 19.5 22.5 21.5 8 24 8z" fill="%23fff"/></svg>';
+
+  // 过滤黑名单和自定义的历史网站，最多10个
+  const filteredHistorySites = dockSites
+    .filter(site =>
+      !customSites.some(cs => cs.domain === site.domain) &&
+      !historySiteBlacklist.includes(site.domain)
+    )
+    .slice(0, 10);
+
+  const mergedDockSites = [
+    ...customSites,
+    ...filteredHistorySites
+  ].slice(0, 15);
+
+  // Dock栏相关
+  const [customFavicons, setCustomFavicons] = useState<{ [domain: string]: string }>(() => {
+    try {
+      const saved = localStorage.getItem('customFavicons');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  const saveCustomFavicons = (favicons: { [domain: string]: string }) => {
+    setCustomFavicons(favicons);
+    localStorage.setItem('customFavicons', JSON.stringify(favicons));
+  };
+
+  // 更换图标弹窗相关逻辑
+  const [faviconEditDomain, setFaviconEditDomain] = useState<string | null>(null);
+  const [faviconInput, setFaviconInput] = useState('');
+  const [faviconEditType, setFaviconEditType] = useState<'custom' | 'history' | null>(null);
+  const [faviconMode, setFaviconMode] = useState<'domain' | 'upload'>('domain');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFaviconEdit = (domain: string, type: 'custom' | 'history') => {
+    setFaviconEditDomain(domain);
+    setFaviconEditType(type);
+    setFaviconInput('');
+    setFaviconMode('domain');
+  };
+
+  const handleFaviconSave = () => {
+    if (!faviconEditDomain) return;
+    let faviconUrl = '';
+    if (faviconMode === 'domain' && faviconInput.trim()) {
+      // 拼接 Google favicon API
+      faviconUrl = `https://s2.googleusercontent.com/s2/favicons?sz=64&domain_url=${faviconInput.trim()}`;
+    } else if (faviconMode === 'upload' && faviconInput) {
+      faviconUrl = faviconInput;
+    }
+    if (faviconUrl) {
+      saveCustomFavicons({ ...customFavicons, [faviconEditDomain]: faviconUrl });
+    } else {
+      const { [faviconEditDomain]: _, ...rest } = customFavicons;
+      saveCustomFavicons(rest);
+    }
+    setFaviconEditDomain(null);
+    setFaviconEditType(null);
+    setFaviconInput('');
+  };
+
+  const handleFaviconFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setFaviconInput(ev.target?.result as string);
+      setFaviconMode('upload');
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleDeleteSite = () => {
+    if (!faviconEditDomain || !faviconEditType) return;
+    if (faviconEditType === 'custom') {
+      const newSites = customSites.filter(s => s.domain !== faviconEditDomain);
+      saveCustomSites(newSites);
+    } else {
+      const newList = Array.from(new Set([...historySiteBlacklist, faviconEditDomain]));
+      saveHistorySiteBlacklist(newList);
+    }
+    setFaviconEditDomain(null);
+    setFaviconEditType(null);
+    setFaviconInput('');
+  };
 
   return (
     <div className="relative min-h-screen bg-cover bg-center" style={{ backgroundImage: `url(${wallpaper})` }}>
@@ -327,15 +478,6 @@ function App() {
         </form>
       </div>
 
-      {/* 右上角极简天气控件（固定） */}
-      <div className="absolute top-6 right-6 z-30 flex flex-col items-end">
-        <div className="px-6 h-12 flex items-center rounded-full shadow-sm bg-black/20 backdrop-blur-sm text-white/90 text-base font-light select-none">
-          <span className="mr-2">☀️</span>
-          <span>28°C</span>
-          <span className="ml-3 text-xs text-white/60">Beijing</span>
-        </div>
-      </div>
-
       {/* 可拖动日历卡片 */}
       <div
         ref={calendarRef}
@@ -343,7 +485,7 @@ function App() {
         style={{
           position: 'absolute',
           top: calendarPos.top,
-          left: calendarPos.left,
+          right: 24,
         }}
         onMouseDown={onMouseDown}
       >
@@ -379,29 +521,132 @@ function App() {
       <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-40 w-full flex justify-center pointer-events-none">
         <div className="flex items-end px-8 py-2 bg-white/30 backdrop-blur-md rounded-3xl shadow-2xl space-x-4 transition-shadow duration-200 pointer-events-auto"
           style={{ minWidth: 240, maxWidth: '90vw' }}>
-          {fallbackSites.map(site => (
+          {mergedDockSites.map((site) => (
             <a
-              key={site.domain}
-              href={site.url}
+              key={site.domain + (site.addTime || '')}
+              href={`https://${site.domain}`}
               target="_blank"
               rel="noopener noreferrer"
               className="flex flex-col items-center group"
               title={site.domain}
               style={{ minWidth: 56 }}
+              onMouseDown={(e) => {
+                if (e.button === 0) {
+                  longPressTimer.current = setTimeout(() => {
+                    handleFaviconEdit(site.domain, site.addTime ? 'custom' : 'history');
+                  }, 800);
+                }
+              }}
+              onMouseUp={() => {
+                if (longPressTimer.current) clearTimeout(longPressTimer.current);
+              }}
+              onMouseLeave={() => {
+                if (longPressTimer.current) clearTimeout(longPressTimer.current);
+              }}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                handleFaviconEdit(site.domain, site.addTime ? 'custom' : 'history');
+              }}
             >
-              <img
-                src={`https://www.google.com/s2/favicons?domain=${site.domain}&sz=64`}
-                alt={site.domain}
-                className="w-14 h-14 rounded-xl shadow-md bg-white/40 group-hover:scale-125 group-hover:shadow-2xl transition-transform duration-200"
-                style={{ objectFit: 'contain' }}
-                onLoad={() => handleFaviconLoad(site.domain)}
-                onError={() => handleFaviconError(site.domain)}
-              />
-              <span className="mt-1 text-xs text-white/70 truncate w-14 text-center group-hover:text-white/90">{site.domain}</span>
+              <Favicon domain={site.domain} defaultFavicon={defaultFavicon} customFavicon={customFavicons[site.domain]} />
             </a>
           ))}
+          {customSites.length < 5 && (
+            <button
+              className="flex flex-col items-center justify-center w-14 h-14 rounded-xl bg-white/40 hover:bg-white/60 shadow-md group transition"
+              style={{ minWidth: 56 }}
+              onClick={() => setShowAddSite(true)}
+            >
+              <Plus className="w-8 h-8 text-blue-500" />
+            </button>
+          )}
         </div>
       </div>
+
+      {/* 添加网站弹窗 */}
+      {showAddSite && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 shadow-2xl w-80 flex flex-col">
+            <h3 className="text-lg font-semibold mb-4">添加网站</h3>
+            <input
+              className="mb-4 p-2 border rounded"
+              placeholder="网址，如 https://xxx.com"
+              value={addSiteUrl}
+              onChange={e => setAddSiteUrl(e.target.value)}
+            />
+            <div className="flex justify-end space-x-2">
+              <button className="px-4 py-1 bg-gray-200 rounded" onClick={() => setShowAddSite(false)}>取消</button>
+              <button className="px-4 py-1 bg-blue-500 text-white rounded" onClick={handleAddSite}>添加</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 删除确认弹窗 */}
+      {siteToConfirmDelete && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 shadow-2xl w-72 flex flex-col items-center">
+            <div className="mb-4 text-lg">
+              {`确定要删除 ${siteToConfirmDelete.domain} 吗?`}
+            </div>
+            <div className="flex space-x-4">
+              <button className="px-4 py-1 bg-gray-200 rounded" onClick={() => setSiteToConfirmDelete(null)}>取消</button>
+              <button className="px-4 py-1 bg-red-500 text-white rounded" onClick={confirmDelete}>删除</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 更换图标弹窗 */}
+      {faviconEditDomain && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 shadow-2xl w-80 flex flex-col">
+            <h3 className="text-lg font-semibold mb-4">更换图标 - {faviconEditDomain}</h3>
+            <div className="flex mb-2 space-x-2">
+              <button className={`px-3 py-1 rounded ${faviconMode==='domain'?'bg-blue-500 text-white':'bg-gray-200'}`} onClick={()=>{setFaviconMode('domain'); setFaviconInput('');}}>通过域名</button>
+              <button className={`px-3 py-1 rounded ${faviconMode==='upload'?'bg-blue-500 text-white':'bg-gray-200'}`} onClick={()=>{setFaviconMode('upload'); setFaviconInput('');}}>上传图片</button>
+            </div>
+            {faviconMode === 'domain' ? (
+              <input
+                className="mb-2 p-2 border rounded"
+                placeholder="输入域名（如 baidu.com）"
+                value={faviconInput}
+                onChange={e => setFaviconInput(e.target.value)}
+              />
+            ) : (
+              <>
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="mb-2"
+                  style={{ display: 'none' }}
+                  ref={fileInputRef}
+                  onChange={handleFaviconFile}
+                />
+                <button className="mb-2 px-4 py-1 bg-gray-200 rounded" onClick={() => fileInputRef.current?.click()}>上传图片</button>
+              </>
+            )}
+            <div className="flex justify-between mt-2">
+              <button className="px-4 py-1 bg-gray-200 rounded" onClick={() => { setFaviconEditDomain(null); setFaviconEditType(null); setFaviconInput(''); }}>取消</button>
+              <button className="px-4 py-1 bg-blue-500 text-white rounded" onClick={handleFaviconSave}>保存</button>
+              <button className="px-4 py-1 bg-red-500 text-white rounded" onClick={() => { setFaviconInput(''); saveCustomFavicons({ ...customFavicons, [faviconEditDomain!]: '' }); setFaviconEditDomain(null); setFaviconEditType(null); }}>恢复默认</button>
+            </div>
+            <button className="mt-4 px-4 py-1 bg-red-600 text-white rounded" onClick={handleDeleteSite}>删除网站</button>
+            {/* 预览区 */}
+            <div className="mt-4 flex flex-col items-center">
+              {faviconMode === 'domain' && faviconInput.trim() && (
+                <img src={`https://s2.googleusercontent.com/s2/favicons?sz=64&domain_url=${faviconInput.trim()}`} alt="预览" className="w-14 h-14 object-contain rounded" />
+              )}
+              {faviconMode === 'upload' && faviconInput && (
+                <img src={faviconInput} alt="预览" className="w-14 h-14 object-contain rounded" />
+              )}
+              <div className="text-xs text-gray-500 mt-2">
+                {faviconMode === 'domain' ? '输入域名，自动获取 favicon 图标' : '上传图片作为自定义图标'}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 底部极简版权和下载按钮 */}
       <div className="absolute bottom-0 left-0 right-0 flex justify-between items-end p-4 select-none">
