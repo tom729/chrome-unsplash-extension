@@ -444,6 +444,48 @@ function App() {
     setFaviconInput('');
   };
 
+  // 日历事项相关
+  const [calendarNotes, setCalendarNotes] = useState<{ [date: string]: string[] }>(() => {
+    try {
+      const saved = localStorage.getItem('calendarNotes');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+  const saveCalendarNotes = (notes: { [date: string]: string[] }) => {
+    setCalendarNotes(notes);
+    localStorage.setItem('calendarNotes', JSON.stringify(notes));
+  };
+  const [noteEditDate, setNoteEditDate] = useState<string | null>(null);
+  const [noteInput, setNoteInput] = useState('');
+  const [noteHoverDate, setNoteHoverDate] = useState<string | null>(null);
+
+  const handleDateDblClick = (d: number) => {
+    if (!d) return;
+    const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    setNoteEditDate(dateStr);
+    setNoteInput('');
+  };
+  const handleNoteAdd = () => {
+    if (!noteEditDate || !noteInput.trim()) return;
+    const notes = calendarNotes[noteEditDate] ? [...calendarNotes[noteEditDate], noteInput.trim()] : [noteInput.trim()];
+    saveCalendarNotes({ ...calendarNotes, [noteEditDate]: notes });
+    setNoteInput('');
+  };
+  const handleNoteDelete = (idx: number) => {
+    if (!noteEditDate) return;
+    const notes = [...(calendarNotes[noteEditDate] || [])];
+    notes.splice(idx, 1);
+    const newNotes = { ...calendarNotes };
+    if (notes.length) {
+      newNotes[noteEditDate] = notes;
+    } else {
+      delete newNotes[noteEditDate];
+    }
+    saveCalendarNotes(newNotes);
+  };
+
   return (
     <div className="relative min-h-screen bg-cover bg-center" style={{ backgroundImage: `url(${wallpaper})` }}>
       {error && (
@@ -498,21 +540,36 @@ function App() {
             {weekDays.map(d => <div key={d} className="text-center">{d}</div>)}
           </div>
           <div className="grid grid-cols-7 gap-1">
-            {weeks.flat().map((d, i) =>
-              d ? (
+            {weeks.flat().map((d, i) => {
+              const dateStr = d ? `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}` : '';
+              const hasNote = !!calendarNotes[dateStr];
+              return d ? (
                 <div
                   key={i}
-                  className={`h-8 flex items-center justify-center rounded-full transition-all
+                  className={`h-8 flex flex-col items-center justify-center rounded-full transition-all relative
                     ${d === date ? 'bg-white/80 text-black font-bold shadow' : ''}
                     ${(i%7===0||i%7===6) && d !== date ? 'text-white/40' : ''}
-                  `}
+                    ${hasNote ? 'cursor-pointer' : ''}`}
+                  onDoubleClick={() => handleDateDblClick(d)}
+                  onMouseEnter={() => hasNote && setNoteHoverDate(dateStr)}
+                  onMouseLeave={() => setNoteHoverDate(null)}
                 >
-                  {d}
+                  <span>{d}</span>
+                  {hasNote && <span className="w-1.5 h-1.5 bg-blue-500 rounded-full mt-0.5"></span>}
+                  {/* 悬浮时显示事项列表 */}
+                  {noteHoverDate === dateStr && (
+                    <div className="absolute z-50 top-8 left-1/2 -translate-x-1/2 bg-white text-black rounded shadow-lg p-2 min-w-[120px] text-xs">
+                      <div className="font-bold mb-1">注意事项</div>
+                      <ul>
+                        {(calendarNotes[dateStr]||[]).map((n, idx) => <li key={idx} className="mb-1">{n}</li>)}
+                      </ul>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div key={i} className="h-8" />
-              )
-            )}
+              );
+            })}
           </div>
         </div>
       </div>
@@ -644,6 +701,34 @@ function App() {
                 {faviconMode === 'domain' ? '输入域名，自动获取 favicon 图标' : '上传图片作为自定义图标'}
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 添加/查看事项弹窗 */}
+      {noteEditDate && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 shadow-2xl w-80 flex flex-col">
+            <h3 className="text-lg font-semibold mb-4">{noteEditDate} 的注意事项</h3>
+            <ul className="mb-2 max-h-32 overflow-y-auto">
+              {(calendarNotes[noteEditDate]||[]).map((n, idx) => (
+                <li key={idx} className="flex justify-between items-center mb-1">
+                  <span>{n}</span>
+                  <button className="ml-2 px-2 py-0.5 bg-red-200 text-xs rounded" onClick={()=>handleNoteDelete(idx)}>删除</button>
+                </li>
+              ))}
+            </ul>
+            <div className="flex mb-2">
+              <input
+                className="flex-1 p-2 border rounded mr-2"
+                placeholder="添加新事项"
+                value={noteInput}
+                onChange={e => setNoteInput(e.target.value)}
+                onKeyDown={e => { if (e.key==='Enter') handleNoteAdd(); }}
+              />
+              <button className="px-3 py-1 bg-blue-500 text-white rounded" onClick={handleNoteAdd}>添加</button>
+            </div>
+            <button className="mt-2 px-4 py-1 bg-gray-200 rounded" onClick={()=>setNoteEditDate(null)}>关闭</button>
           </div>
         </div>
       )}
