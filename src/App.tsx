@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Download, Search, Plus } from 'lucide-react';
 import ColorThief from 'colorthief';
+import useI18n from './useI18n';
 
 // Mock chrome API for development environment
 const mockChrome = {
@@ -109,6 +110,7 @@ function Favicon({ domain, defaultFavicon, customFavicon }: { domain: string; de
 }
 
 function App() {
+  const t = useI18n();
   const [wallpaper, setWallpaper] = useState('');
   const [time, setTime] = useState(new Date());
   const [photographer, setPhotographer] = useState('');
@@ -125,7 +127,7 @@ function App() {
   const month = today.getMonth();
   const date = today.getDate();
   const weeks = getMonthCalendar(year, month);
-  const weekDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const weekDays = [t('sun'), t('mon'), t('tue'), t('wed'), t('thu'), t('fri'), t('sat')];
 
   // 日历拖动相关
   const defaultCalendarPos = { top: 24, left: window.innerWidth - 400, right: 24 };
@@ -511,7 +513,7 @@ function App() {
             onChange={(e) => setSearchTerm(e.target.value)}
             onFocus={() => setSearchFocused(true)}
             onBlur={() => setSearchFocused(false)}
-            placeholder="Search..."
+            placeholder={t('search_placeholder')}
             className={`pl-10 pr-4 h-12 rounded-full focus:outline-none text-sm transition-all duration-300 bg-white/30 backdrop-blur-md placeholder:text-white/50 text-white shadow-md ${searchFocused || searchTerm ? 'w-80 scale-105 shadow-lg' : 'w-32'} border border-white/10`}
             style={{
               boxShadow: searchFocused || searchTerm ? '0 4px 24px 0 rgba(0,0,0,0.10)' : '0 1px 4px 0 rgba(0,0,0,0.06)',
@@ -532,11 +534,10 @@ function App() {
         onMouseDown={onMouseDown}
       >
         <div className="w-80 p-4 rounded-2xl shadow-lg bg-black/20 backdrop-blur-md text-white/90 select-none">
-          <div className="flex justify-between items-center mb-2">
-            <span className="font-semibold text-lg">{year}-{String(month+1).padStart(2,'0')}</span>
-            <span className="text-xs text-white/60">{today.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</span>
+          <div className="flex flex-col items-start mb-2">
+            <span className="font-semibold text-lg pl-2">{year}-{String(month+1).padStart(2,'0')}</span>
           </div>
-          <div className="grid grid-cols-7 text-xs text-white/60 mb-1">
+          <div className="grid grid-cols-7 text-xs text-white/60 mb-1 text-center">
             {weekDays.map(d => <div key={d} className="text-center">{d}</div>)}
           </div>
           <div className="grid grid-cols-7 gap-1">
@@ -546,7 +547,7 @@ function App() {
               return d ? (
                 <div
                   key={i}
-                  className={`h-8 flex flex-col items-center justify-center rounded-full transition-all relative
+                  className={`h-8 flex flex-col items-center justify-center rounded-full transition-all relative text-center
                     ${d === date ? 'bg-white/80 text-black font-bold shadow' : ''}
                     ${(i%7===0||i%7===6) && d !== date ? 'text-white/40' : ''}
                     ${hasNote ? 'cursor-pointer' : ''}`}
@@ -559,7 +560,7 @@ function App() {
                   {/* 悬浮时显示事项列表 */}
                   {noteHoverDate === dateStr && (
                     <div className="absolute z-50 top-8 left-1/2 -translate-x-1/2 bg-white text-black rounded shadow-lg p-2 min-w-[120px] text-xs">
-                      <div className="font-bold mb-1">注意事项</div>
+                      <div className="font-bold mb-1">{t('note_list')}</div>
                       <ul>
                         {(calendarNotes[dateStr]||[]).map((n, idx) => <li key={idx} className="mb-1">{n}</li>)}
                       </ul>
@@ -624,16 +625,16 @@ function App() {
       {showAddSite && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl p-6 shadow-2xl w-80 flex flex-col">
-            <h3 className="text-lg font-semibold mb-4">添加网站</h3>
+            <h3 className="text-lg font-semibold mb-4">{t('add_site')}</h3>
             <input
               className="mb-4 p-2 border rounded"
-              placeholder="网址，如 https://xxx.com"
+              placeholder={t('add_site_placeholder')}
               value={addSiteUrl}
               onChange={e => setAddSiteUrl(e.target.value)}
             />
             <div className="flex justify-end space-x-2">
-              <button className="px-4 py-1 bg-gray-200 rounded" onClick={() => setShowAddSite(false)}>取消</button>
-              <button className="px-4 py-1 bg-blue-500 text-white rounded" onClick={handleAddSite}>添加</button>
+              <button className="px-4 py-1 bg-gray-200 rounded" onClick={() => setShowAddSite(false)}>{t('cancel')}</button>
+              <button className="px-4 py-1 bg-blue-500 text-white rounded" onClick={handleAddSite}>{t('add')}</button>
             </div>
           </div>
         </div>
@@ -643,12 +644,10 @@ function App() {
       {siteToConfirmDelete && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl p-6 shadow-2xl w-72 flex flex-col items-center">
-            <div className="mb-4 text-lg">
-              {`确定要删除 ${siteToConfirmDelete.domain} 吗?`}
-            </div>
+            <div className="mb-4 text-lg">{t('delete_confirm', [siteToConfirmDelete.domain])}</div>
             <div className="flex space-x-4">
-              <button className="px-4 py-1 bg-gray-200 rounded" onClick={() => setSiteToConfirmDelete(null)}>取消</button>
-              <button className="px-4 py-1 bg-red-500 text-white rounded" onClick={confirmDelete}>删除</button>
+              <button className="px-4 py-1 bg-gray-200 rounded" onClick={() => setSiteToConfirmDelete(null)}>{t('cancel')}</button>
+              <button className="px-4 py-1 bg-red-500 text-white rounded" onClick={confirmDelete}>{t('delete')}</button>
             </div>
           </div>
         </div>
@@ -658,15 +657,15 @@ function App() {
       {faviconEditDomain && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl p-6 shadow-2xl w-80 flex flex-col">
-            <h3 className="text-lg font-semibold mb-4">更换图标 - {faviconEditDomain}</h3>
+            <h3 className="text-lg font-semibold mb-4">{t('change_icon')} - {faviconEditDomain}</h3>
             <div className="flex mb-2 space-x-2">
-              <button className={`px-3 py-1 rounded ${faviconMode==='domain'?'bg-blue-500 text-white':'bg-gray-200'}`} onClick={()=>{setFaviconMode('domain'); setFaviconInput('');}}>通过域名</button>
-              <button className={`px-3 py-1 rounded ${faviconMode==='upload'?'bg-blue-500 text-white':'bg-gray-200'}`} onClick={()=>{setFaviconMode('upload'); setFaviconInput('');}}>上传图片</button>
+              <button className={`px-3 py-1 rounded ${faviconMode==='domain'?'bg-blue-500 text-white':'bg-gray-200'}`} onClick={()=>{setFaviconMode('domain'); setFaviconInput('');}}>{t('by_domain')}</button>
+              <button className={`px-3 py-1 rounded ${faviconMode==='upload'?'bg-blue-500 text-white':'bg-gray-200'}`} onClick={()=>{setFaviconMode('upload'); setFaviconInput('');}}>{t('upload_image')}</button>
             </div>
             {faviconMode === 'domain' ? (
               <input
                 className="mb-2 p-2 border rounded"
-                placeholder="输入域名（如 baidu.com）"
+                placeholder={t('input_domain')}
                 value={faviconInput}
                 onChange={e => setFaviconInput(e.target.value)}
               />
@@ -680,26 +679,24 @@ function App() {
                   ref={fileInputRef}
                   onChange={handleFaviconFile}
                 />
-                <button className="mb-2 px-4 py-1 bg-gray-200 rounded" onClick={() => fileInputRef.current?.click()}>上传图片</button>
+                <button className="mb-2 px-4 py-1 bg-gray-200 rounded" onClick={() => fileInputRef.current?.click()}>{t('upload_image')}</button>
               </>
             )}
             <div className="flex justify-between mt-2">
-              <button className="px-4 py-1 bg-gray-200 rounded" onClick={() => { setFaviconEditDomain(null); setFaviconEditType(null); setFaviconInput(''); }}>取消</button>
-              <button className="px-4 py-1 bg-blue-500 text-white rounded" onClick={handleFaviconSave}>保存</button>
-              <button className="px-4 py-1 bg-red-500 text-white rounded" onClick={() => { setFaviconInput(''); saveCustomFavicons({ ...customFavicons, [faviconEditDomain!]: '' }); setFaviconEditDomain(null); setFaviconEditType(null); }}>恢复默认</button>
+              <button className="px-4 py-1 bg-gray-200 rounded" onClick={() => { setFaviconEditDomain(null); setFaviconEditType(null); setFaviconInput(''); }}>{t('cancel')}</button>
+              <button className="px-4 py-1 bg-blue-500 text-white rounded" onClick={handleFaviconSave}>{t('save')}</button>
+              <button className="px-4 py-1 bg-red-500 text-white rounded" onClick={() => { setFaviconInput(''); saveCustomFavicons({ ...customFavicons, [faviconEditDomain!]: '' }); setFaviconEditDomain(null); setFaviconEditType(null); }}>{t('restore_default')}</button>
             </div>
-            <button className="mt-4 px-4 py-1 bg-red-600 text-white rounded" onClick={handleDeleteSite}>删除网站</button>
+            <button className="mt-4 px-4 py-1 bg-red-600 text-white rounded" onClick={handleDeleteSite}>{t('remove_site')}</button>
             {/* 预览区 */}
             <div className="mt-4 flex flex-col items-center">
               {faviconMode === 'domain' && faviconInput.trim() && (
-                <img src={`https://s2.googleusercontent.com/s2/favicons?sz=64&domain_url=${faviconInput.trim()}`} alt="预览" className="w-14 h-14 object-contain rounded" />
+                <img src={`https://s2.googleusercontent.com/s2/favicons?sz=64&domain_url=${faviconInput.trim()}`} alt={t('preview')} className="w-14 h-14 object-contain rounded" />
               )}
               {faviconMode === 'upload' && faviconInput && (
-                <img src={faviconInput} alt="预览" className="w-14 h-14 object-contain rounded" />
+                <img src={faviconInput} alt={t('preview')} className="w-14 h-14 object-contain rounded" />
               )}
-              <div className="text-xs text-gray-500 mt-2">
-                {faviconMode === 'domain' ? '输入域名，自动获取 favicon 图标' : '上传图片作为自定义图标'}
-              </div>
+              <div className="text-xs text-gray-500 mt-2">{faviconMode === 'domain' ? t('domain_favicon_tip') : t('upload_favicon_tip')}</div>
             </div>
           </div>
         </div>
@@ -709,26 +706,26 @@ function App() {
       {noteEditDate && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl p-6 shadow-2xl w-80 flex flex-col">
-            <h3 className="text-lg font-semibold mb-4">{noteEditDate} 的注意事项</h3>
+            <h3 className="text-lg font-semibold mb-4">{noteEditDate} {t('note_list')}</h3>
             <ul className="mb-2 max-h-32 overflow-y-auto">
               {(calendarNotes[noteEditDate]||[]).map((n, idx) => (
                 <li key={idx} className="flex justify-between items-center mb-1">
                   <span>{n}</span>
-                  <button className="ml-2 px-2 py-0.5 bg-red-200 text-xs rounded" onClick={()=>handleNoteDelete(idx)}>删除</button>
+                  <button className="ml-2 px-2 py-0.5 bg-red-200 text-xs rounded" onClick={()=>handleNoteDelete(idx)}>{t('delete')}</button>
                 </li>
               ))}
             </ul>
             <div className="flex mb-2">
               <input
                 className="flex-1 p-2 border rounded mr-2"
-                placeholder="添加新事项"
+                placeholder={t('note_placeholder')}
                 value={noteInput}
                 onChange={e => setNoteInput(e.target.value)}
                 onKeyDown={e => { if (e.key==='Enter') handleNoteAdd(); }}
               />
-              <button className="px-3 py-1 bg-blue-500 text-white rounded" onClick={handleNoteAdd}>添加</button>
+              <button className="px-3 py-1 bg-blue-500 text-white rounded" onClick={handleNoteAdd}>{t('add')}</button>
             </div>
-            <button className="mt-2 px-4 py-1 bg-gray-200 rounded" onClick={()=>setNoteEditDate(null)}>关闭</button>
+            <button className="mt-2 px-4 py-1 bg-gray-200 rounded" onClick={()=>setNoteEditDate(null)}>{t('close')}</button>
           </div>
         </div>
       )}
@@ -754,9 +751,8 @@ function App() {
               Photo by{' '}
               <a href={photoUrl} target="_blank" rel="noopener noreferrer" className="underline hover:text-white/80 transition">
                 {photographer}
-              </a>{' '}
-              on{' '}
-              <a href="https://www.unsplash.com" target="_blank" rel="noopener noreferrer" className="underline hover:text-white/80 transition">
+              </a>{' '}on{' '}
+              <a href="https://unsplash.com" target="_blank" rel="noopener noreferrer" className="underline hover:text-white/80 transition">
                 Unsplash
               </a>
             </span>

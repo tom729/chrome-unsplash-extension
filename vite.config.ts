@@ -14,7 +14,7 @@ export default defineConfig({
     viteStaticCopy({
       targets: [
         {
-          src: 'src/background.ts',
+          src: '_locales',
           dest: '.'
         },
         {
@@ -24,12 +24,15 @@ export default defineConfig({
       ]
     }),
   ],
+  define: {
+    'process.env.UNSPLASH_ACCESS_KEY': JSON.stringify(process.env.VITE_UNSPLASH_ACCESS_KEY)
+  },
   build: {
     assetsInlineLimit: 10000,
     rollupOptions: {
       input: {
         main: path.resolve(__dirname, 'index.html'),
-        background: path.resolve(__dirname, 'background.js'),
+        background: path.resolve(__dirname, 'src/background.ts'),
       },
       output: {
         entryFileNames: `[name].js`,

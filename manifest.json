@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Aesthetic and Productive Tab",
+  "name": "__MSG_app_name__",
   "version": "1.5",
-  "description": "New tab with Unsplash photography, customizable shortcuts, multi-engine search. Make every tab an inspiring workspace.",
+  "description": "__MSG_app_description__",
   "permissions": [
     "storage",
     "alarms",
@@ -22,5 +22,6 @@
   },
   "chrome_url_overrides": {
     "newtab": "index.html"
-  }
+  },
+  "default_locale": "en"
 }

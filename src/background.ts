@@ -1,4 +1,4 @@
-const UNSPLASH_ACCESS_KEY = 'YOUR_UNSPLASH_ACCESS_KEY';
+const UNSPLASH_ACCESS_KEY = import.meta.env.VITE_UNSPLASH_ACCESS_KEY;
 
 // Check if we're in a Chrome extension environment
 const isExtension = typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id;
