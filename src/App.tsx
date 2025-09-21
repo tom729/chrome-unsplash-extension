@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Download, Search, Plus } from 'lucide-react';
+import { Download, Search, Plus, History, X } from 'lucide-react';
 import ColorThief from 'colorthief';
 import useI18n from './useI18n';
 
@@ -121,6 +121,10 @@ function App() {
   const [searchTerm, setSearchTerm] = useState('');
   const [searchFocused, setSearchFocused] = useState(false);
 
+  // 壁纸历史记录相关状态
+  const [wallpaperHistory, setWallpaperHistory] = useState<any[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+
   // 日历相关
   const today = new Date();
   const year = today.getFullYear();
@@ -180,7 +184,7 @@ function App() {
     const timer = setInterval(() => setTime(new Date()), 1000);
 
     const getInitialData = () => {
-      chromeApi.storage.sync.get(['wallpaper', 'photographer', 'photoUrl', 'downloadUrl', 'error'], (result) => {
+      chromeApi.storage.sync.get(['wallpaper', 'photographer', 'photoUrl', 'downloadUrl', 'error', 'wallpaperHistory'], (result) => {
         if (result.error) setError(result.error);
         if (result.wallpaper) {
           setWallpaper(result.wallpaper);
@@ -189,6 +193,7 @@ function App() {
         if (result.photographer) setPhotographer(result.photographer);
         if (result.photoUrl) setPhotoUrl(result.photoUrl);
         if (result.downloadUrl) setDownloadUrl(result.downloadUrl);
+        if (result.wallpaperHistory) setWallpaperHistory(result.wallpaperHistory);
       });
     };
 
@@ -201,6 +206,7 @@ function App() {
         if (changes.photoUrl) setPhotoUrl(changes.photoUrl.newValue);
         if (changes.downloadUrl) setDownloadUrl(changes.downloadUrl.newValue);
         if (changes.error) setError(changes.error.newValue || '');
+        if (changes.wallpaperHistory) setWallpaperHistory(changes.wallpaperHistory.newValue || []);
       }
     };
 
@@ -239,7 +245,18 @@ function App() {
     const filename = `unsplash-${sanitizedPhotographer.replace(/\\s+/g, '-') || 'wallpaper'}.jpg`;
     chromeApi.runtime.sendMessage({
       action: 'downloadWallpaper',
-      url: downloadUrl,
+      downloadLocation: downloadUrl,
+      filename: filename
+    });
+  };
+
+  // 从历史记录下载壁纸
+  const handleHistoryDownload = (historyItem: any) => {
+    const sanitizedPhotographer = historyItem.photographer.replace(/[\\/:*?"<>|]/g, '').trim();
+    const filename = `unsplash-${sanitizedPhotographer.replace(/\\s+/g, '-') || 'wallpaper'}.jpg`;
+    chromeApi.runtime.sendMessage({
+      action: 'downloadWallpaper',
+      downloadLocation: historyItem.downloadLocation,
       filename: filename
     });
   };
@@ -749,16 +766,24 @@ function App() {
           {photographer && (
             <span>
               Photo by{' '}
-              <a href={photoUrl} target="_blank" rel="noopener noreferrer" className="underline hover:text-white/80 transition">
+              <a href={photoUrl} className="underline hover:text-white/80 transition">
                 {photographer}
               </a>{' '}on{' '}
-              <a href="https://unsplash.com" target="_blank" rel="noopener noreferrer" className="underline hover:text-white/80 transition">
+              <a href="https://unsplash.com" className="underline hover:text-white/80 transition">
                 Unsplash
               </a>
             </span>
           )}
         </div>
         <div className="flex space-x-4">
+          <button
+            onClick={() => setShowHistory(true)}
+            className="bg-black/30 backdrop-blur-md p-2 rounded-full shadow-md transition-transform duration-200 hover:scale-110 hover:shadow-lg"
+            style={{ backgroundColor: textColor === 'white' ? 'rgba(0,0,0,0.3)' : 'rgba(255,255,255,0.3)' }}
+            title={t('wallpaper_history')}
+          >
+            <History className="w-6 h-6 text-white/80" />
+          </button>
           <button
             onClick={handleDownload}
             className="bg-black/30 backdrop-blur-md p-2 rounded-full shadow-md transition-transform duration-200 hover:scale-110 hover:shadow-lg"
@@ -768,6 +793,73 @@ function App() {
           </button>
         </div>
       </div>
+
+      {/* 壁纸历史记录弹窗 */}
+      {showHistory && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white/90 backdrop-blur-md rounded-2xl p-6 max-w-4xl w-full max-h-[80vh] overflow-hidden">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-semibold text-gray-800">{t('wallpaper_history')}</h3>
+              <button
+                onClick={() => setShowHistory(false)}
+                className="p-2 hover:bg-gray-200 rounded-full transition-colors"
+              >
+                <X className="w-6 h-6 text-gray-600" />
+              </button>
+            </div>
+            
+            <div className="overflow-y-auto max-h-[60vh]">
+              {wallpaperHistory.length === 0 ? (
+                <p className="text-gray-600 text-center py-8">{t('no_history')}</p>
+              ) : (
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                  {wallpaperHistory.map((item, index) => (
+                    <div key={item.id || index} className="group relative">
+                      <div className="aspect-video rounded-lg overflow-hidden bg-gray-200">
+                        <img
+                          src={item.wallpaperThumb || item.wallpaper}
+                          alt={`Photo by ${item.photographer}`}
+                          className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-105"
+                        />
+                      </div>
+                      
+                      {/* 悬浮信息 */}
+                      <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity duration-200 rounded-lg flex flex-col justify-between p-3">
+                        <div>
+                          <p className="text-white text-sm font-medium truncate">
+                            {item.photographer}
+                          </p>
+                          <p className="text-white/80 text-xs">
+                            {new Date(item.timestamp).toLocaleDateString()}
+                          </p>
+                        </div>
+                        
+                        <div className="flex justify-end space-x-2">
+                          <button
+                            onClick={() => handleHistoryDownload(item)}
+                            className="bg-white/20 backdrop-blur-sm p-2 rounded-full hover:bg-white/30 transition-colors"
+                            title={t('download')}
+                          >
+                            <Download className="w-4 h-4 text-white" />
+                          </button>
+                          <a
+                            href={item.photoUrl}
+                            className="bg-white/20 backdrop-blur-sm p-2 rounded-full hover:bg-white/30 transition-colors"
+                            title={t('view_on_unsplash')}
+                          >
+                            <Search className="w-4 h-4 text-white" />
+                          </a>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

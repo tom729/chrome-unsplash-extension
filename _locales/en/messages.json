@@ -29,5 +29,9 @@
   "delete_confirm": { "message": "Are you sure you want to delete $1?" },
   "by_domain": { "message": "By Domain" },
   "domain_favicon_tip": { "message": "Enter a domain to fetch its favicon" },
-  "upload_favicon_tip": { "message": "Upload a custom favicon image" }
+  "upload_favicon_tip": { "message": "Upload a custom favicon image" },
+  "wallpaper_history": { "message": "Wallpaper History" },
+  "no_history": { "message": "No wallpaper history yet" },
+  "view_on_unsplash": { "message": "View on Unsplash" },
+  "download": { "message": "Download" }
 } 

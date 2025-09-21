@@ -12,7 +12,8 @@
   ],
   "host_permissions": [
     "https://s2.googleusercontent.com/",
-    "https://api.unsplash.com/"
+    "https://api.unsplash.com/",
+    "https://images.unsplash.com/*"
   ],
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'; img-src 'self' data: blob: https://s2.googleusercontent.com/ https://images.unsplash.com/ https://*.gstatic.com/; connect-src 'self' https://s2.googleusercontent.com/ https://api.unsplash.com/;"
