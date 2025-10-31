@@ -8,7 +8,8 @@
     "alarms",
     "search",
     "downloads",
-    "history"
+    "history",
+    "tabs"
   ],
   "host_permissions": [
     "https://s2.googleusercontent.com/",

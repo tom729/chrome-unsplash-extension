@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Download, Search, Plus, History, X } from 'lucide-react';
+import { Download, Search, Plus, History, X, RefreshCw } from 'lucide-react';
 import ColorThief from 'colorthief';
 import useI18n from './useI18n';
 
@@ -9,11 +9,38 @@ const mockChrome = {
     sync: {
       get: (keys: string[] | string, callback: (result: any) => void) => {
         const keyList = Array.isArray(keys) ? keys : [keys];
-        const result = keyList.reduce((acc, key) => ({ ...acc, [key]: localStorage.getItem(key) }), {});
+        const result = keyList.reduce((acc, key) => {
+          const value = localStorage.getItem(`sync_${key}`);
+          return { ...acc, [key]: value ? JSON.parse(value) : undefined };
+        }, {});
         callback(result);
       },
       set: (items: { [key: string]: any }, callback?: () => void) => {
-        Object.entries(items).forEach(([key, value]) => localStorage.setItem(key, JSON.stringify(value)));
+        Object.entries(items).forEach(([key, value]) => localStorage.setItem(`sync_${key}`, JSON.stringify(value)));
+        if (callback) callback();
+      },
+      remove: (keys: string[] | string, callback?: () => void) => {
+        const keyList = Array.isArray(keys) ? keys : [keys];
+        keyList.forEach(key => localStorage.removeItem(`sync_${key}`));
+        if (callback) callback();
+      },
+    },
+    local: {
+      get: (keys: string[] | string, callback: (result: any) => void) => {
+        const keyList = Array.isArray(keys) ? keys : [keys];
+        const result = keyList.reduce((acc, key) => {
+          const value = localStorage.getItem(`local_${key}`);
+          return { ...acc, [key]: value ? JSON.parse(value) : undefined };
+        }, {});
+        callback(result);
+      },
+      set: (items: { [key: string]: any }, callback?: () => void) => {
+        Object.entries(items).forEach(([key, value]) => localStorage.setItem(`local_${key}`, JSON.stringify(value)));
+        if (callback) callback();
+      },
+      remove: (keys: string[] | string, callback?: () => void) => {
+        const keyList = Array.isArray(keys) ? keys : [keys];
+        keyList.forEach(key => localStorage.removeItem(`local_${key}`));
         if (callback) callback();
       },
     },
@@ -124,6 +151,15 @@ function App() {
   // 壁纸历史记录相关状态
   const [wallpaperHistory, setWallpaperHistory] = useState<any[]>([]);
   const [showHistory, setShowHistory] = useState(false);
+  const historyModalRef = useRef<HTMLDivElement>(null);
+  
+  // 壁纸加载状态
+  const [isLoadingWallpaper, setIsLoadingWallpaper] = useState(false);
+  // 使用ref来跟踪请求状态，避免闭包问题
+  const isRequestingUpdateRef = useRef(false);
+  // 保存超时ID，用于清理
+  const loadingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const refreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // 日历相关
   const today = new Date();
@@ -184,16 +220,58 @@ function App() {
     const timer = setInterval(() => setTime(new Date()), 1000);
 
     const getInitialData = () => {
-      chromeApi.storage.sync.get(['wallpaper', 'photographer', 'photoUrl', 'downloadUrl', 'error', 'wallpaperHistory'], (result) => {
-        if (result.error) setError(result.error);
-        if (result.wallpaper) {
-          setWallpaper(result.wallpaper);
-          updateTextColor(result.wallpaper);
-        }
-        if (result.photographer) setPhotographer(result.photographer);
-        if (result.photoUrl) setPhotoUrl(result.photoUrl);
-        if (result.downloadUrl) setDownloadUrl(result.downloadUrl);
-        if (result.wallpaperHistory) setWallpaperHistory(result.wallpaperHistory);
+      // 分别从 sync 和 local storage 读取数据
+      // 注意：迁移逻辑由 background script 处理，前端只负责读取
+      chromeApi.storage.sync.get(['wallpaper', 'photographer', 'photoUrl', 'downloadUrl', 'error'], (syncResult) => {
+        chromeApi.storage.local.get(['wallpaperHistory'], (localResult) => {
+          if (syncResult.error) setError(syncResult.error);
+          
+          // 优先展示历史中最近的壁纸或当前壁纸
+          const hasCurrentWallpaper = syncResult.wallpaper;
+          const history = localResult.wallpaperHistory || [];
+          const hasHistory = history.length > 0;
+          
+          if (hasCurrentWallpaper) {
+            // 如果有当前壁纸，直接显示
+            setWallpaper(syncResult.wallpaper);
+            updateTextColor(syncResult.wallpaper);
+          } else if (hasHistory) {
+            // 如果没有当前壁纸但有历史记录，显示最近的一张
+            const latestWallpaper = history[0];
+            setWallpaper(latestWallpaper.wallpaper);
+            setPhotographer(latestWallpaper.photographer);
+            setPhotoUrl(latestWallpaper.photoUrl);
+            setDownloadUrl(latestWallpaper.downloadLocation);
+            updateTextColor(latestWallpaper.wallpaper);
+          }
+          
+          // 设置其他数据
+          if (syncResult.photographer) setPhotographer(syncResult.photographer);
+          if (syncResult.photoUrl) setPhotoUrl(syncResult.photoUrl);
+          if (syncResult.downloadUrl) setDownloadUrl(syncResult.downloadUrl);
+          if (history) setWallpaperHistory(history);
+          
+          // 清除之前的超时（如果有）
+          if (loadingTimeoutRef.current) {
+            clearTimeout(loadingTimeoutRef.current);
+            loadingTimeoutRef.current = null;
+          }
+          
+          // 总是在后台加载新壁纸（除非是首次安装且没有历史记录）
+          setIsLoadingWallpaper(true);
+          isRequestingUpdateRef.current = true;
+          chromeApi.runtime.sendMessage({ action: 'updateWallpaper' });
+          
+          // 添加超时保护：30秒后自动重置加载状态
+          loadingTimeoutRef.current = setTimeout(() => {
+            if (isRequestingUpdateRef.current) {
+              console.warn('壁纸加载超时，重置加载状态');
+              setIsLoadingWallpaper(false);
+              isRequestingUpdateRef.current = false;
+            }
+            loadingTimeoutRef.current = null;
+          }, 30000);
+        });
       });
     };
 
@@ -201,23 +279,74 @@ function App() {
 
     const storageChangeListener = (changes: { [key: string]: any }, area: string) => {
       if (area === 'sync') {
-        if (changes.wallpaper) setWallpaper(changes.wallpaper.newValue);
-        if (changes.photographer) setPhotographer(changes.photographer.newValue);
-        if (changes.photoUrl) setPhotoUrl(changes.photoUrl.newValue);
-        if (changes.downloadUrl) setDownloadUrl(changes.downloadUrl.newValue);
-        if (changes.error) setError(changes.error.newValue || '');
-        if (changes.wallpaperHistory) setWallpaperHistory(changes.wallpaperHistory.newValue || []);
+        // 只有当前标签页正在请求更新时才更新壁纸显示
+        if (changes.wallpaper && isRequestingUpdateRef.current) {
+          setWallpaper(changes.wallpaper.newValue);
+          if (changes.wallpaper.newValue) {
+            updateTextColor(changes.wallpaper.newValue);
+            // 新壁纸加载完成，停止加载状态
+            setIsLoadingWallpaper(false);
+            isRequestingUpdateRef.current = false;
+            // 清除超时
+            if (loadingTimeoutRef.current) {
+              clearTimeout(loadingTimeoutRef.current);
+              loadingTimeoutRef.current = null;
+            }
+            if (refreshTimeoutRef.current) {
+              clearTimeout(refreshTimeoutRef.current);
+              refreshTimeoutRef.current = null;
+            }
+          }
+        }
+        
+        // 摄影师、链接等信息只在当前标签页请求时更新
+        if (isRequestingUpdateRef.current) {
+          if (changes.photographer) setPhotographer(changes.photographer.newValue);
+          if (changes.photoUrl) setPhotoUrl(changes.photoUrl.newValue);
+          if (changes.downloadUrl) setDownloadUrl(changes.downloadUrl.newValue);
+        }
+        
+        // 错误信息总是更新
+        if (changes.error !== undefined) {
+          const errorMsg = changes.error.newValue || '';
+          setError(errorMsg);
+          // 如果当前标签页正在请求更新，遇到错误时重置加载状态
+          if (isRequestingUpdateRef.current) {
+            setIsLoadingWallpaper(false);
+            isRequestingUpdateRef.current = false;
+            // 清除超时
+            if (loadingTimeoutRef.current) {
+              clearTimeout(loadingTimeoutRef.current);
+              loadingTimeoutRef.current = null;
+            }
+            if (refreshTimeoutRef.current) {
+              clearTimeout(refreshTimeoutRef.current);
+              refreshTimeoutRef.current = null;
+            }
+          }
+        }
+      } else if (area === 'local') {
+        // 历史记录存储在 local storage 中，总是更新
+        if (changes.wallpaperHistory) {
+          setWallpaperHistory(changes.wallpaperHistory.newValue || []);
+        }
       }
     };
 
     chromeApi.storage.onChanged.addListener(storageChangeListener);
-
-    // Request an update on load to get the latest wallpaper
-    chromeApi.runtime.sendMessage({ action: 'updateWallpaper' });
     
     return () => {
       clearInterval(timer);
       chromeApi.storage.onChanged.removeListener(storageChangeListener);
+      // 清理超时
+      if (loadingTimeoutRef.current) {
+        clearTimeout(loadingTimeoutRef.current);
+        loadingTimeoutRef.current = null;
+      }
+      if (refreshTimeoutRef.current) {
+        clearTimeout(refreshTimeoutRef.current);
+        refreshTimeoutRef.current = null;
+      }
     };
   }, []);
 
@@ -245,9 +374,32 @@ function App() {
     const filename = `unsplash-${sanitizedPhotographer.replace(/\\s+/g, '-') || 'wallpaper'}.jpg`;
     chromeApi.runtime.sendMessage({
       action: 'downloadWallpaper',
+      wallpaperUrl: wallpaper, // 添加缺失的wallpaperUrl参数
       downloadLocation: downloadUrl,
       filename: filename
     });
+  };
+
+  const handleRefreshWallpaper = () => {
+    // 清除之前的超时（如果有）
+    if (refreshTimeoutRef.current) {
+      clearTimeout(refreshTimeoutRef.current);
+      refreshTimeoutRef.current = null;
+    }
+    
+    setIsLoadingWallpaper(true);
+    isRequestingUpdateRef.current = true;
+    chromeApi.runtime.sendMessage({ action: 'updateWallpaper' });
+    
+    // 添加超时保护：30秒后自动重置加载状态
+    refreshTimeoutRef.current = setTimeout(() => {
+      if (isRequestingUpdateRef.current) {
+        console.warn('壁纸刷新超时，重置加载状态');
+        setIsLoadingWallpaper(false);
+        isRequestingUpdateRef.current = false;
+      }
+      refreshTimeoutRef.current = null;
+    }, 30000);
   };
 
   // 从历史记录下载壁纸
@@ -256,6 +408,7 @@ function App() {
     const filename = `unsplash-${sanitizedPhotographer.replace(/\\s+/g, '-') || 'wallpaper'}.jpg`;
     chromeApi.runtime.sendMessage({
       action: 'downloadWallpaper',
+      wallpaperUrl: historyItem.wallpaper, // 添加缺失的wallpaperUrl参数
       downloadLocation: historyItem.downloadLocation,
       filename: filename
     });
@@ -593,8 +746,8 @@ function App() {
       </div>
 
       {/* 底部Dock栏（macOS风格毛玻璃地板） */}
-      <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-40 w-full flex justify-center pointer-events-none">
-        <div className="flex items-end px-8 py-2 bg-white/30 backdrop-blur-md rounded-3xl shadow-2xl space-x-4 transition-shadow duration-200 pointer-events-auto"
+      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-40 w-full flex justify-center pointer-events-none">
+        <div className="flex items-end px-6 py-3 bg-white/30 backdrop-blur-md rounded-3xl shadow-2xl space-x-4 transition-shadow duration-200 pointer-events-auto"
           style={{ minWidth: 240, maxWidth: '90vw' }}>
           {mergedDockSites.map((site) => (
             <a
@@ -775,81 +928,162 @@ function App() {
             </span>
           )}
         </div>
-        <div className="flex space-x-4">
+        <div className="flex space-x-3">
+          <button
+            onClick={handleRefreshWallpaper}
+            className="bg-black/30 backdrop-blur-md p-3 rounded-full shadow-md transition-transform duration-200 hover:scale-110 hover:shadow-lg"
+            style={{ backgroundColor: textColor === 'white' ? 'rgba(0,0,0,0.3)' : 'rgba(255,255,255,0.3)' }}
+            title={isLoadingWallpaper ? "正在加载新壁纸..." : "刷新壁纸"}
+            disabled={isLoadingWallpaper}
+          >
+            <RefreshCw className={`w-5 h-5 text-white/80 transition-all duration-200 ${isLoadingWallpaper ? 'animate-spin' : ''}`} />
+          </button>
           <button
             onClick={() => setShowHistory(true)}
-            className="bg-black/30 backdrop-blur-md p-2 rounded-full shadow-md transition-transform duration-200 hover:scale-110 hover:shadow-lg"
+            className="bg-black/30 backdrop-blur-md p-3 rounded-full shadow-md transition-transform duration-200 hover:scale-110 hover:shadow-lg"
             style={{ backgroundColor: textColor === 'white' ? 'rgba(0,0,0,0.3)' : 'rgba(255,255,255,0.3)' }}
             title={t('wallpaper_history')}
           >
-            <History className="w-6 h-6 text-white/80" />
+            <History className="w-5 h-5 text-white/80" />
           </button>
           <button
             onClick={handleDownload}
-            className="bg-black/30 backdrop-blur-md p-2 rounded-full shadow-md transition-transform duration-200 hover:scale-110 hover:shadow-lg"
+            className="bg-black/30 backdrop-blur-md p-3 rounded-full shadow-md transition-transform duration-200 hover:scale-110 hover:shadow-lg"
             style={{ backgroundColor: textColor === 'white' ? 'rgba(0,0,0,0.3)' : 'rgba(255,255,255,0.3)' }}
           >
-            <Download className="w-6 h-6 text-white/80" />
+            <Download className="w-5 h-5 text-white/80" />
           </button>
         </div>
       </div>
 
       {/* 壁纸历史记录弹窗 */}
       {showHistory && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white/90 backdrop-blur-md rounded-2xl p-6 max-w-4xl w-full max-h-[80vh] overflow-hidden">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-xl font-semibold text-gray-800">{t('wallpaper_history')}</h3>
+        <div 
+          className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center p-4 z-50"
+          onClick={(e) => {
+            // 点击遮罩层（外部区域）时关闭弹窗
+            if (e.target === e.currentTarget) {
+              setShowHistory(false);
+            }
+          }}
+        >
+          <div 
+            ref={historyModalRef}
+            className="bg-gradient-to-br from-white/95 to-white/85 backdrop-blur-xl rounded-3xl shadow-2xl border border-white/20 p-8 max-w-6xl w-full max-h-[85vh] overflow-hidden"
+            onClick={(e) => {
+              // 阻止点击内容区域时关闭弹窗
+              e.stopPropagation();
+            }}
+          >
+            {/* 标题区域 */}
+            <div className="flex justify-between items-start mb-6">
+              <div>
+                <h3 className="text-2xl font-bold bg-gradient-to-r from-gray-800 to-gray-600 bg-clip-text text-transparent mb-2">
+                  {t('wallpaper_history')}
+                </h3>
+                <p className="text-sm text-gray-500 flex items-center gap-2">
+                  <History className="w-4 h-4" />
+                  {t('history_limit_hint')} • {wallpaperHistory.length} / 20
+                </p>
+              </div>
               <button
                 onClick={() => setShowHistory(false)}
-                className="p-2 hover:bg-gray-200 rounded-full transition-colors"
+                className="p-3 hover:bg-gray-100/80 rounded-full transition-all duration-200 hover:scale-110 group"
               >
-                <X className="w-6 h-6 text-gray-600" />
+                <X className="w-6 h-6 text-gray-500 group-hover:text-gray-700" />
               </button>
             </div>
             
-            <div className="overflow-y-auto max-h-[60vh]">
+            {/* 内容区域 */}
+            <div className="overflow-y-auto max-h-[65vh] pr-2 custom-scrollbar">
               {wallpaperHistory.length === 0 ? (
-                <p className="text-gray-600 text-center py-8">{t('no_history')}</p>
+                <div className="flex flex-col items-center justify-center py-16 text-center">
+                  <div className="w-20 h-20 bg-gradient-to-br from-blue-100 to-purple-100 rounded-full flex items-center justify-center mb-4">
+                    <History className="w-10 h-10 text-gray-400" />
+                  </div>
+                  <p className="text-gray-500 text-lg font-medium mb-2">{t('no_history')}</p>
+                  <p className="text-gray-400 text-sm">打开几个新标签页来开始收集美丽的壁纸吧！</p>
+                </div>
               ) : (
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
                   {wallpaperHistory.map((item, index) => (
                     <div key={item.id || index} className="group relative">
-                      <div className="aspect-video rounded-lg overflow-hidden bg-gray-200">
-                        <img
-                          src={item.wallpaperThumb || item.wallpaper}
-                          alt={`Photo by ${item.photographer}`}
-                          className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-105"
-                        />
-                      </div>
-                      
-                      {/* 悬浮信息 */}
-                      <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity duration-200 rounded-lg flex flex-col justify-between p-3">
-                        <div>
-                          <p className="text-white text-sm font-medium truncate">
-                            {item.photographer}
-                          </p>
-                          <p className="text-white/80 text-xs">
-                            {new Date(item.timestamp).toLocaleDateString()}
-                          </p>
+                      {/* 卡片容器 */}
+                      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-gray-100 to-gray-50 shadow-lg hover:shadow-2xl transition-all duration-300 group-hover:scale-[1.02] group-hover:-translate-y-1">
+                        {/* 图片 */}
+                        <div className="aspect-[4/3] overflow-hidden">
+                          <img
+                            src={item.thumbnail}
+                            alt={`Photo by ${item.photographer}`}
+                            className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+                            loading="lazy"
+                          />
                         </div>
                         
-                        <div className="flex justify-end space-x-2">
-                          <button
-                            onClick={() => handleHistoryDownload(item)}
-                            className="bg-white/20 backdrop-blur-sm p-2 rounded-full hover:bg-white/30 transition-colors"
-                            title={t('download')}
-                          >
-                            <Download className="w-4 h-4 text-white" />
-                          </button>
-                          <a
-                            href={item.photoUrl}
-                            className="bg-white/20 backdrop-blur-sm p-2 rounded-full hover:bg-white/30 transition-colors"
-                            title={t('view_on_unsplash')}
-                          >
-                            <Search className="w-4 h-4 text-white" />
-                          </a>
+                        {/* 渐变遮罩 */}
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-10" />
+                        
+                        {/* 悬浮信息 */}
+                        <div className="absolute inset-0 flex flex-col justify-between p-4 opacity-0 group-hover:opacity-100 transition-all duration-300 z-20">
+                          {/* 顶部信息 */}
+                          <div className="flex justify-end">
+                            <div className="bg-white/20 backdrop-blur-sm px-3 py-1 rounded-full">
+                              <span className="text-white text-xs font-medium">
+                                #{index + 1}
+                              </span>
+                            </div>
+                          </div>
+                          
+                          {/* 底部信息和操作 */}
+                          <div>
+                            <div className="mb-3">
+                              <p className="text-white text-sm font-semibold truncate mb-1">
+                                📸 {item.photographer}
+                              </p>
+                              <p className="text-white/80 text-xs">
+                                {new Date(item.timestamp).toLocaleDateString('zh-CN', {
+                                  month: 'short',
+                                  day: 'numeric',
+                                  hour: '2-digit',
+                                  minute: '2-digit'
+                                })}
+                              </p>
+                            </div>
+                            
+                            {/* 操作按钮 */}
+                            <div className="flex justify-center space-x-3 relative z-30">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleHistoryDownload(item);
+                                }}
+                                className="bg-white/25 backdrop-blur-sm p-2.5 rounded-full hover:bg-white/35 transition-all duration-200 hover:scale-110 group/btn cursor-pointer relative z-40"
+                                title={t('download')}
+                              >
+                                <Download className="w-4 h-4 text-white group-hover/btn:text-blue-200" />
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  // 使用 Chrome API 在新标签页中打开链接
+                                  if (typeof chrome !== 'undefined' && chrome.tabs) {
+                                    chrome.tabs.create({ url: item.photoUrl });
+                                  } else {
+                                    // 开发环境使用 window.open
+                                    window.open(item.photoUrl, '_blank');
+                                  }
+                                }}
+                                className="bg-white/25 backdrop-blur-sm p-2.5 rounded-full hover:bg-white/35 transition-all duration-200 hover:scale-110 group/btn cursor-pointer relative z-40"
+                                title={t('view_on_unsplash')}
+                              >
+                                <Search className="w-4 h-4 text-white group-hover/btn:text-green-200" />
+                              </button>
+                            </div>
+                          </div>
                         </div>
+                        
+                        {/* 卡片边框光效 */}
+                        <div className="absolute inset-0 rounded-2xl ring-1 ring-white/20 group-hover:ring-white/40 transition-all duration-300" />
                       </div>
                     </div>
                   ))}

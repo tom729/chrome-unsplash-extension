@@ -31,6 +31,7 @@
   "domain_favicon_tip": { "message": "输入域名以获取网站图标" },
   "upload_favicon_tip": { "message": "上传自定义网站图标" },
   "wallpaper_history": { "message": "壁纸历史" },
+  "history_limit_hint": { "message": "自动保存最近20张壁纸" },
   "no_history": { "message": "暂无壁纸历史记录" },
   "view_on_unsplash": { "message": "在Unsplash查看" },
   "download": { "message": "下载" }
