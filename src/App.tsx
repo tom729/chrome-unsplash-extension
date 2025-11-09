@@ -284,6 +284,12 @@ function App() {
           setWallpaper(changes.wallpaper.newValue);
           if (changes.wallpaper.newValue) {
             updateTextColor(changes.wallpaper.newValue);
+            
+            // 同时更新摄影师、链接等信息（因为它们是一起保存的）
+            if (changes.photographer) setPhotographer(changes.photographer.newValue);
+            if (changes.photoUrl) setPhotoUrl(changes.photoUrl.newValue);
+            if (changes.downloadUrl) setDownloadUrl(changes.downloadUrl.newValue);
+            
             // 新壁纸加载完成，停止加载状态
             setIsLoadingWallpaper(false);
             isRequestingUpdateRef.current = false;
@@ -299,8 +305,8 @@ function App() {
           }
         }
         
-        // 摄影师、链接等信息只在当前标签页请求时更新
-        if (isRequestingUpdateRef.current) {
+        // 如果 wallpaper 没有变化，但其他字段有变化，且当前标签页正在请求更新时也更新
+        if (!changes.wallpaper && isRequestingUpdateRef.current) {
           if (changes.photographer) setPhotographer(changes.photographer.newValue);
           if (changes.photoUrl) setPhotoUrl(changes.photoUrl.newValue);
           if (changes.downloadUrl) setDownloadUrl(changes.downloadUrl.newValue);
