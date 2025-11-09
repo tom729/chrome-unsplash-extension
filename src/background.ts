@@ -97,24 +97,33 @@ if (isExtension) {
     // 安装或更新时也执行迁移
     migrateWallpaperHistory();
     chrome.alarms.create('changeWallpaper', { periodInMinutes: 30 });
-    updateWallpaper();
+    chrome.storage.sync.get(['wallpaperTopic'], (result) => {
+      console.log('扩展安装/更新，topicId:', result.wallpaperTopic);
+      updateWallpaper(result.wallpaperTopic);
+    });
   });
 
   chrome.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === 'changeWallpaper') {
-      updateWallpaper();
+      chrome.storage.sync.get(['wallpaperTopic'], (result) => {
+        console.log('定时器触发更新壁纸，topicId:', result.wallpaperTopic);
+        updateWallpaper(result.wallpaperTopic);
+      });
     }
   });
 
   chrome.runtime.onMessage.addListener(
     (request, sender, sendResponse) => {
       if (request.action === 'updateWallpaper') {
-        updateWallpaper();
+        console.log('收到更新壁纸请求，topicId:', request.topicId, '类型:', typeof request.topicId);
+        updateWallpaper(request.topicId);
       } else if (request.action === 'pauseAlarm') {
         chrome.alarms.clear('changeWallpaper');
       } else if (request.action === 'resumeAlarm') {
         chrome.alarms.create('changeWallpaper', { periodInMinutes: 30 });
-        updateWallpaper();
+        chrome.storage.sync.get(['wallpaperTopic'], (result) => {
+          updateWallpaper(result.wallpaperTopic);
+        });
       } else if (
         request.action === 'downloadWallpaper' &&
         request.wallpaperUrl && // 用图片直链
@@ -173,8 +182,27 @@ function trackDownload(
   });
 }
 
-function updateWallpaper() {
-  fetch('https://api.unsplash.com/photos/random?orientation=landscape', {
+function updateWallpaper(topicId?: string) {
+  // 构建 API URL
+  // Unsplash API 的 /photos/random 端点支持 query 参数来搜索特定主题
+  // 这比使用 /search/photos 更简单直接
+  let apiUrl: string;
+  
+  // 确保 topicId 是字符串类型，并去除空白
+  const safeTopicId = typeof topicId === 'string' ? topicId.trim() : '';
+  
+  if (safeTopicId && safeTopicId !== 'all') {
+    // 将 topicId 转换为查询关键词（将连字符替换为空格）
+    const query = safeTopicId.replace(/-/g, ' ');
+    apiUrl = `https://api.unsplash.com/photos/random?query=${encodeURIComponent(query)}&orientation=landscape`;
+    console.log('请求壁纸（分类）:', safeTopicId, '查询关键词:', query, 'API URL:', apiUrl);
+  } else {
+    // 使用随机图片接口（不指定分类）
+    apiUrl = 'https://api.unsplash.com/photos/random?orientation=landscape';
+    console.log('请求壁纸（全部）:', 'API URL:', apiUrl);
+  }
+  
+  fetch(apiUrl, {
     headers: {
       Authorization: `Client-ID ${UNSPLASH_ACCESS_KEY}`,
     },
@@ -186,34 +214,41 @@ function updateWallpaper() {
       return response.json();
     })
     .then((data) => {
+      console.log('API 响应数据:', data);
+      // /photos/random 端点直接返回单个图片对象，无需处理搜索结果
+      const photoData = data;
+      
       // 验证API响应数据结构
-      if (!data || !data.urls || !data.user || !data.links) {
+      if (!photoData || !photoData.urls || !photoData.user || !photoData.links) {
+        console.error('无效的图片数据结构:', photoData);
         throw new Error('Invalid API response structure');
       }
+      
+      console.log('成功获取壁纸，摄影师:', photoData.user.name, '主题:', topicId);
       const wallpaperData = {
-        wallpaper: data.urls.full, // 图片直链
-        wallpaperThumb: data.urls.thumb, // 缩略图
-        photographer: data.user.name,
-        photoUrl: data.links.html.replace(
+        wallpaper: photoData.urls.full, // 图片直链
+        wallpaperThumb: photoData.urls.thumb, // 缩略图
+        photographer: photoData.user.name,
+        photoUrl: photoData.links.html.replace(
           'https://unsplash.com',
           'https://www.unsplash.com'
         ),
-        downloadUrl: data.links.download_location, // 仅统计用
+        downloadUrl: photoData.links.download_location, // 仅统计用
       };
 
       // 保存壁纸历史记录（优化数据结构以减少存储空间）
       const historyItem = {
-        id: data.id,
+        id: photoData.id,
         timestamp: Date.now(),
-        photographer: data.user.name,
-        photoUrl: data.links.html.replace(
+        photographer: photoData.user.name,
+        photoUrl: photoData.links.html.replace(
           'https://unsplash.com',
           'https://www.unsplash.com'
         ),
-        downloadLocation: data.links.download_location,
+        downloadLocation: photoData.links.download_location,
         // 保存完整URL用于下载，但限制历史记录数量
-        wallpaper: data.urls.full,
-        thumbnail: data.urls.thumb,
+        wallpaper: photoData.urls.full,
+        thumbnail: photoData.urls.thumb,
       };
 
       if (isExtension) {
@@ -288,13 +323,21 @@ function updateWallpaper() {
     })
     .catch((error) => {
       console.error('获取壁纸失败:', error);
+      console.error('错误详情:', {
+        message: error.message,
+        stack: error.stack,
+        topicId: topicId
+      });
       // 将错误保存到storage，让前端知道请求失败并重置加载状态
       if (isExtension) {
         chrome.storage.sync.set({ error: error.message || '获取壁纸失败' }, () => {
+          if (chrome.runtime.lastError) {
+            console.error('保存错误信息失败:', chrome.runtime.lastError);
+          }
           // 清除错误标记，避免影响后续请求
           setTimeout(() => {
             chrome.storage.sync.set({ error: '' }, () => {});
-          }, 1000);
+          }, 3000); // 延长到3秒，让用户能看到错误信息
         });
       }
     });

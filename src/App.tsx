@@ -1,7 +1,24 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Download, Search, Plus, History, X, RefreshCw } from 'lucide-react';
+import { Download, Search, Plus, History, X, RefreshCw, Palette } from 'lucide-react';
 import ColorThief from 'colorthief';
 import useI18n from './useI18n';
+
+// 壁纸主题列表
+const WALLPAPER_TOPICS = [
+  { id: 'all', name: '全部', nameEn: 'All' },
+  { id: 'nature', name: '自然', nameEn: 'Nature' },
+  { id: 'wallpapers', name: '壁纸', nameEn: 'Wallpapers' },
+  { id: 'architecture', name: '建筑', nameEn: 'Architecture' },
+  { id: 'street-photography', name: '街拍', nameEn: 'Street' },
+  { id: 'travel', name: '旅行', nameEn: 'Travel' },
+  { id: 'textures-patterns', name: '纹理', nameEn: 'Textures' },
+  { id: 'animals', name: '动物', nameEn: 'Animals' },
+  { id: 'business-work', name: '商务', nameEn: 'Business' },
+  { id: 'people', name: '人物', nameEn: 'People' },
+  { id: 'arts-culture', name: '艺术', nameEn: 'Arts' },
+  { id: 'food-drink', name: '美食', nameEn: 'Food' },
+  { id: 'technology', name: '科技', nameEn: 'Technology' },
+];
 
 // Mock chrome API for development environment
 const mockChrome = {
@@ -50,8 +67,12 @@ const mockChrome = {
     }
   },
   runtime: {
-    sendMessage: (message: any) => {
+    sendMessage: (message: any, callback?: (response?: any) => void) => {
       console.log('Mock sendMessage:', message);
+      if (callback) {
+        // 模拟异步响应
+        setTimeout(() => callback(), 0);
+      }
     },
     onMessage: {
       addListener: (callback: (message: any) => void) => {
@@ -153,6 +174,10 @@ function App() {
   const [showHistory, setShowHistory] = useState(false);
   const historyModalRef = useRef<HTMLDivElement>(null);
   
+  // 壁纸主题相关状态
+  const [wallpaperTopic, setWallpaperTopic] = useState<string>('all');
+  const [showTopicSelector, setShowTopicSelector] = useState(false);
+  
   // 壁纸加载状态
   const [isLoadingWallpaper, setIsLoadingWallpaper] = useState(false);
   // 使用ref来跟踪请求状态，避免闭包问题
@@ -222,8 +247,12 @@ function App() {
     const getInitialData = () => {
       // 分别从 sync 和 local storage 读取数据
       // 注意：迁移逻辑由 background script 处理，前端只负责读取
-      chromeApi.storage.sync.get(['wallpaper', 'photographer', 'photoUrl', 'downloadUrl', 'error'], (syncResult) => {
+      chromeApi.storage.sync.get(['wallpaper', 'photographer', 'photoUrl', 'downloadUrl', 'error', 'wallpaperTopic'], (syncResult) => {
         chromeApi.storage.local.get(['wallpaperHistory'], (localResult) => {
+          // 读取主题设置
+          if (syncResult.wallpaperTopic) {
+            setWallpaperTopic(syncResult.wallpaperTopic);
+          }
           if (syncResult.error) setError(syncResult.error);
           
           // 优先展示历史中最近的壁纸或当前壁纸
@@ -260,7 +289,21 @@ function App() {
           // 总是在后台加载新壁纸（除非是首次安装且没有历史记录）
           setIsLoadingWallpaper(true);
           isRequestingUpdateRef.current = true;
-          chromeApi.runtime.sendMessage({ action: 'updateWallpaper' });
+          
+          // 确保消息对象是可序列化的 - 只包含基本类型
+          const topicId = syncResult.wallpaperTopic;
+          const initMessage = {
+            action: 'updateWallpaper',
+            topicId: (typeof topicId === 'string' ? topicId : 'all')
+          };
+          
+          try {
+            chromeApi.runtime.sendMessage(initMessage);
+          } catch (error) {
+            console.error('初始化时发送消息失败:', error);
+            setIsLoadingWallpaper(false);
+            isRequestingUpdateRef.current = false;
+          }
           
           // 添加超时保护：30秒后自动重置加载状态
           loadingTimeoutRef.current = setTimeout(() => {
@@ -278,9 +321,11 @@ function App() {
     getInitialData();
 
     const storageChangeListener = (changes: { [key: string]: any }, area: string) => {
+      console.log('Storage 更新事件:', { area, changes, isRequestingUpdate: isRequestingUpdateRef.current });
       if (area === 'sync') {
         // 只有当前标签页正在请求更新时才更新壁纸显示
         if (changes.wallpaper && isRequestingUpdateRef.current) {
+          console.log('收到壁纸更新:', changes.wallpaper.newValue);
           setWallpaper(changes.wallpaper.newValue);
           if (changes.wallpaper.newValue) {
             updateTextColor(changes.wallpaper.newValue);
@@ -291,6 +336,7 @@ function App() {
             if (changes.downloadUrl) setDownloadUrl(changes.downloadUrl.newValue);
             
             // 新壁纸加载完成，停止加载状态
+            console.log('壁纸加载完成，停止加载状态');
             setIsLoadingWallpaper(false);
             isRequestingUpdateRef.current = false;
             // 清除超时
@@ -312,12 +358,27 @@ function App() {
           if (changes.downloadUrl) setDownloadUrl(changes.downloadUrl.newValue);
         }
         
+        // 监听 wallpaperTopic 变化，同步状态
+        if (changes.wallpaperTopic) {
+          const newTopicId = changes.wallpaperTopic.newValue;
+          console.log('wallpaperTopic 变化:', {
+            oldValue: changes.wallpaperTopic.oldValue,
+            newValue: newTopicId,
+            currentState: wallpaperTopic
+          });
+          if (typeof newTopicId === 'string') {
+            setWallpaperTopic(newTopicId);
+          }
+        }
+        
         // 错误信息总是更新
         if (changes.error !== undefined) {
           const errorMsg = changes.error.newValue || '';
+          console.log('收到错误信息:', errorMsg);
           setError(errorMsg);
           // 如果当前标签页正在请求更新，遇到错误时重置加载状态
           if (isRequestingUpdateRef.current) {
+            console.log('遇到错误，停止加载状态');
             setIsLoadingWallpaper(false);
             isRequestingUpdateRef.current = false;
             // 清除超时
@@ -378,15 +439,21 @@ function App() {
     // Sanitize the photographer's name to remove characters that are invalid in filenames
     const sanitizedPhotographer = photographer.replace(/[\\/:*?"<>|]/g, '').trim();
     const filename = `unsplash-${sanitizedPhotographer.replace(/\\s+/g, '-') || 'wallpaper'}.jpg`;
-    chromeApi.runtime.sendMessage({
+    // 确保所有值都是字符串类型，可序列化
+    const message = {
       action: 'downloadWallpaper',
-      wallpaperUrl: wallpaper, // 添加缺失的wallpaperUrl参数
-      downloadLocation: downloadUrl,
-      filename: filename
-    });
+      wallpaperUrl: typeof wallpaper === 'string' ? wallpaper : '',
+      downloadLocation: typeof downloadUrl === 'string' ? downloadUrl : '',
+      filename: typeof filename === 'string' ? filename : 'wallpaper.jpg'
+    };
+    try {
+      chromeApi.runtime.sendMessage(message);
+    } catch (error) {
+      console.error('下载消息发送失败:', error);
+    }
   };
 
-  const handleRefreshWallpaper = () => {
+  const handleRefreshWallpaper = (overrideTopicId?: string) => {
     // 清除之前的超时（如果有）
     if (refreshTimeoutRef.current) {
       clearTimeout(refreshTimeoutRef.current);
@@ -395,7 +462,31 @@ function App() {
     
     setIsLoadingWallpaper(true);
     isRequestingUpdateRef.current = true;
-    chromeApi.runtime.sendMessage({ action: 'updateWallpaper' });
+    // 如果提供了 overrideTopicId，优先使用它；否则使用当前状态
+    const topicToUse = overrideTopicId !== undefined ? overrideTopicId : wallpaperTopic;
+    console.log('发送刷新壁纸请求:', {
+      overrideTopicId,
+      wallpaperTopic,
+      topicToUse,
+      topicToUseType: typeof topicToUse
+    });
+    
+    // 确保消息对象是可序列化的 - 只包含基本类型，确保所有值都是字符串
+    const safeTopicId = typeof topicToUse === 'string' && topicToUse.trim() !== '' ? topicToUse.trim() : 'all';
+    const message = {
+      action: 'updateWallpaper',
+      topicId: safeTopicId
+    };
+    
+    console.log('发送消息对象:', message);
+    
+    try {
+      chromeApi.runtime.sendMessage(message);
+    } catch (error) {
+      console.error('发送消息失败:', error);
+      setIsLoadingWallpaper(false);
+      isRequestingUpdateRef.current = false;
+    }
     
     // 添加超时保护：30秒后自动重置加载状态
     refreshTimeoutRef.current = setTimeout(() => {
@@ -408,16 +499,33 @@ function App() {
     }, 30000);
   };
 
+  // 处理主题变更
+  const handleTopicChange = (topicId: string) => {
+    setWallpaperTopic(topicId);
+    // 保存主题设置
+    chromeApi.storage.sync.set({ wallpaperTopic: topicId }, () => {
+      // 立即刷新壁纸，直接传递新的 topicId 避免状态更新延迟问题
+      handleRefreshWallpaper(topicId);
+    });
+    setShowTopicSelector(false);
+  };
+
   // 从历史记录下载壁纸
   const handleHistoryDownload = (historyItem: any) => {
-    const sanitizedPhotographer = historyItem.photographer.replace(/[\\/:*?"<>|]/g, '').trim();
+    const sanitizedPhotographer = (historyItem.photographer || '').replace(/[\\/:*?"<>|]/g, '').trim();
     const filename = `unsplash-${sanitizedPhotographer.replace(/\\s+/g, '-') || 'wallpaper'}.jpg`;
-    chromeApi.runtime.sendMessage({
+    // 确保所有值都是字符串类型，可序列化
+    const message = {
       action: 'downloadWallpaper',
-      wallpaperUrl: historyItem.wallpaper, // 添加缺失的wallpaperUrl参数
-      downloadLocation: historyItem.downloadLocation,
-      filename: filename
-    });
+      wallpaperUrl: typeof historyItem.wallpaper === 'string' ? historyItem.wallpaper : '',
+      downloadLocation: typeof historyItem.downloadLocation === 'string' ? historyItem.downloadLocation : '',
+      filename: typeof filename === 'string' ? filename : 'wallpaper.jpg'
+    };
+    try {
+      chromeApi.runtime.sendMessage(message);
+    } catch (error) {
+      console.error('历史下载消息发送失败:', error);
+    }
   };
 
   // Dock栏相关
@@ -936,13 +1044,24 @@ function App() {
         </div>
         <div className="flex space-x-3">
           <button
-            onClick={handleRefreshWallpaper}
+            onClick={() => {
+              console.log('刷新按钮点击，当前 wallpaperTopic:', wallpaperTopic);
+              handleRefreshWallpaper();
+            }}
             className="bg-black/30 backdrop-blur-md p-3 rounded-full shadow-md transition-transform duration-200 hover:scale-110 hover:shadow-lg"
             style={{ backgroundColor: textColor === 'white' ? 'rgba(0,0,0,0.3)' : 'rgba(255,255,255,0.3)' }}
             title={isLoadingWallpaper ? "正在加载新壁纸..." : "刷新壁纸"}
             disabled={isLoadingWallpaper}
           >
             <RefreshCw className={`w-5 h-5 text-white/80 transition-all duration-200 ${isLoadingWallpaper ? 'animate-spin' : ''}`} />
+          </button>
+          <button
+            onClick={() => setShowTopicSelector(true)}
+            className="bg-black/30 backdrop-blur-md p-3 rounded-full shadow-md transition-transform duration-200 hover:scale-110 hover:shadow-lg"
+            style={{ backgroundColor: textColor === 'white' ? 'rgba(0,0,0,0.3)' : 'rgba(255,255,255,0.3)' }}
+            title={t('wallpaper_category')}
+          >
+            <Palette className="w-5 h-5 text-white/80" />
           </button>
           <button
             onClick={() => setShowHistory(true)}
@@ -1095,6 +1214,74 @@ function App() {
                   ))}
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 主题选择器弹窗 */}
+      {showTopicSelector && (
+        <div 
+          className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center p-4 z-50"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setShowTopicSelector(false);
+            }
+          }}
+        >
+          <div 
+            className="bg-gradient-to-br from-white/95 to-white/85 backdrop-blur-xl rounded-3xl shadow-2xl border border-white/20 p-8 max-w-4xl w-full max-h-[80vh] overflow-hidden"
+            onClick={(e) => {
+              e.stopPropagation();
+            }}
+          >
+            {/* 标题区域 */}
+            <div className="flex justify-between items-start mb-6">
+              <div>
+                <h3 className="text-2xl font-bold bg-gradient-to-r from-gray-800 to-gray-600 bg-clip-text text-transparent mb-2">
+                  {t('wallpaper_category')}
+                </h3>
+                <p className="text-sm text-gray-500 flex items-center gap-2">
+                  <Palette className="w-4 h-4" />
+                  {t('category_select_hint')}
+                </p>
+              </div>
+              <button
+                onClick={() => setShowTopicSelector(false)}
+                className="p-3 hover:bg-gray-100/80 rounded-full transition-all duration-200 hover:scale-110 group"
+              >
+                <X className="w-6 h-6 text-gray-500 group-hover:text-gray-700" />
+              </button>
+            </div>
+            
+            {/* 主题列表 */}
+            <div className="overflow-y-auto max-h-[60vh] pr-2 custom-scrollbar">
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                {WALLPAPER_TOPICS.map((topic) => {
+                  const isSelected = wallpaperTopic === topic.id;
+                  // 检测当前语言
+                  const isZhCN = typeof chrome !== 'undefined' && chrome.i18n 
+                    ? chrome.i18n.getUILanguage().startsWith('zh')
+                    : navigator.language.startsWith('zh');
+                  const displayName = isZhCN ? topic.name : topic.nameEn;
+                  return (
+                    <button
+                      key={topic.id}
+                      onClick={() => handleTopicChange(topic.id)}
+                      className={`p-4 rounded-2xl transition-all duration-200 text-left ${
+                        isSelected
+                          ? 'bg-gradient-to-br from-blue-500 to-purple-600 text-white shadow-lg scale-105'
+                          : 'bg-white/60 hover:bg-white/80 text-gray-700 hover:scale-105 shadow-md'
+                      }`}
+                    >
+                      <div className="font-semibold text-sm">{displayName}</div>
+                      {isSelected && (
+                        <div className="mt-2 text-xs opacity-90">✓ {t('selected')}</div>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
         </div>

@@ -34,5 +34,8 @@
   "history_limit_hint": { "message": "Automatically saves your last 20 wallpapers" },
   "no_history": { "message": "No wallpaper history yet" },
   "view_on_unsplash": { "message": "View on Unsplash" },
-  "download": { "message": "Download" }
+  "download": { "message": "Download" },
+  "wallpaper_category": { "message": "Wallpaper Category" },
+  "category_select_hint": { "message": "Choose your favorite wallpaper category" },
+  "selected": { "message": "Selected" }
 } 

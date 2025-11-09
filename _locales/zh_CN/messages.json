@@ -34,5 +34,8 @@
   "history_limit_hint": { "message": "自动保存最近20张壁纸" },
   "no_history": { "message": "暂无壁纸历史记录" },
   "view_on_unsplash": { "message": "在Unsplash查看" },
-  "download": { "message": "下载" }
+  "download": { "message": "下载" },
+  "wallpaper_category": { "message": "壁纸分类" },
+  "category_select_hint": { "message": "选择您喜欢的壁纸分类" },
+  "selected": { "message": "已选择" }
 } 
